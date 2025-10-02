@@ -1,5 +1,6 @@
 *.ipynb
 *.bat
+test.py
 dist
 wxauto_logs
 __pycache__
