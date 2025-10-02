@@ -205,6 +205,14 @@ finally:
     wx.StopListening()
 ```
 
+### 11. 关闭更新窗口
+
+```python
+from wxauto4.ui.component import UpdateWindow
+
+if update_window := UpdateWindow():
+    update_window.ignore()
+```
 ---
 
 **免责声明**: 本工具仅用于学习和研究目的，使用者应当遵守相关法律法规，作者不承担任何因使用本工具而产生的法律责任。
