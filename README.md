@@ -213,6 +213,109 @@ from wxauto4.ui.component import UpdateWindow
 if update_window := UpdateWindow():
     update_window.ignore()
 ```
+
+### 12. WebSocket 桥接（远程控制）
+
+通过 WebSocket 将本地微信与后端服务连接：
+
+- **收到微信消息** 时，上报到后端。
+- **后端下发指令** 控制本地微信（发消息/发文件/切换会话/管理监听/引用/转发）。
+
+**安装依赖**（已内置声明）：
+
+```bash
+pip install -e .
+```
+
+**启动方式**：
+
+```bash
+wxauto4-bridge --ws-url ws://127.0.0.1:8080/ws --listen "好友昵称,项目群" --device-id wxrpa-001
+```
+
+或使用环境变量：
+
+```bash
+set WS_URL=ws://127.0.0.1:8080/ws
+set WS_LISTEN=好友昵称,项目群
+set DEVICE_ID=wxrpa-001
+wxauto4-bridge
+```
+
+> 注：暂不启用鉴权；仅支持 Windows + 微信 4.0.5。
+
+**上行事件（event，上行）：微信侧自然事件/消息**
+
+```json
+{
+  "type": "event",
+  "traceId": "uuid",
+  "deviceId": "wxrpa-001",
+  "timestamp": 1739420801123,
+  "payload": {
+    "eventType": "wechat_message",
+    "data": {
+      "messageId": "wxmsg-001",
+      "from": "wx_user_or_chat_name",
+      "chatId": "wx_user_or_chat_name",
+      "msgType": "text|image|file|system",
+      "content": "对方发来文本",
+      "raw": { }
+    }
+  }
+}
+```
+
+**下行指令（command，下行）**
+
+```json
+{
+  "type": "command",
+  "traceId": "uuid",
+  "deviceId": "wxrpa-001",
+  "timestamp": 1739420800123,
+  "payload": {
+    "commandId": "uuid",
+    "action": "send_text",
+    "params": {
+      "to": "wechat_user_or_chat_id",
+      "text": "你好"
+    },
+    "timeoutMs": 8000
+  }
+}
+```
+
+更多动作映射：
+- **send_files**: params `{ "to": "张三", "files": ["C:/a.txt"] }`
+- **chat_with**: params `{ "to": "项目群", "exact": true }`
+- **add_listener/remove_listener/start_listening/stop_listening**
+- **quote/forward**: params 包含 `id/hash`、`text/targets`
+
+**确认与错误（ack/error，上行）**
+
+```json
+{ "type": "ack", "traceId": "uuid", "deviceId": "wxrpa-001", "timestamp": 1739420800124, "payload": { "forType": "command", "forId": "commandId" } }
+{ "type": "error", "traceId": "uuid", "deviceId": "wxrpa-001", "timestamp": 1739420800124, "payload": { "forType": "command", "forId": "commandId", "code": "INVALID_PARAMS", "message": "xxx" } }
+```
+
+**执行结果（command_result，上行）**
+
+```json
+{
+  "type": "command_result",
+  "traceId": "uuid",
+  "deviceId": "wxrpa-001",
+  "timestamp": 1739420802123,
+  "payload": {
+    "commandId": "uuid",
+    "status": "success|failed|timeout|rejected",
+    "result": { "messageId": "xxx" },
+    "error": { "code": "RPA_EXEC_ERROR", "message": "detail" }
+  }
+}
+```
+
 ---
 
 **免责声明**: 本工具仅用于学习和研究目的，使用者应当遵守相关法律法规，作者不承担任何因使用本工具而产生的法律责任。

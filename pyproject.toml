@@ -14,11 +14,13 @@ dependencies = [
     "pillow",
     "psutil",
     "colorama",
-    "comtypes"
+    "comtypes",
+    "websocket-client"
 ]
 
 [project.scripts]
 wxauto4 = "wxauto4.__main__:main"
+wxauto4-bridge = "wxauto4.bridge.main:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
