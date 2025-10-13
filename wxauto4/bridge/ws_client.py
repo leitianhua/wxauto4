@@ -19,6 +19,8 @@ import time
 import queue
 import uuid
 from typing import Any, Callable, Optional
+import logging
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
 try:
     import websocket  # type: ignore
@@ -42,6 +44,9 @@ class WsClient:
         ping_timeout: int = 10,
         reconnect_interval: int = 5,
         device_id: Optional[str] = None,
+        include_device_in: str = "none",  # none|query|header
+        header_name: str = "X-Device-Id",
+        enable_log: bool = True,
     ) -> None:
         """初始化客户端
 
@@ -58,6 +63,16 @@ class WsClient:
         self.ping_timeout = ping_timeout
         self.reconnect_interval = reconnect_interval
         self.device_id = device_id or "wxrpa-unknown"
+        self._device_in = include_device_in
+        self._header_name = header_name
+        # 日志器
+        self._logger = logging.getLogger("wxauto4.ws")
+        if not self._logger.handlers:
+            _h = logging.StreamHandler()
+            _h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+            self._logger.addHandler(_h)
+        self._logger.setLevel(logging.INFO)
+        self._log_enabled = bool(enable_log)
 
         self._ws_app: Optional["websocket.WebSocketApp"] = None
         self._run_thread: Optional[threading.Thread] = None
@@ -111,9 +126,10 @@ class WsClient:
           "payload": { "eventType": event_type, "data": data }
         }
         """
+        _tid = trace_id or str(uuid.uuid4())
         envelope = {
             "type": "event",
-            "traceId": trace_id or str(uuid.uuid4()),
+            "traceId": _tid,
             "deviceId": self.device_id,
             "timestamp": int(time.time() * 1000),
             "payload": {
@@ -122,6 +138,11 @@ class WsClient:
             },
         }
         self._queue_send(envelope)
+        if self._log_enabled:
+            try:
+                self._logger.info(f"[send][event] traceId=%s eventType=%s", _tid, event_type)
+            except Exception:
+                pass
 
     def send_reply(self, reply_to: str, ok: bool, error: Optional[str], data: Any = None) -> None:
         """兼容旧接口：保留但不推荐"""
@@ -135,25 +156,37 @@ class WsClient:
 
     def send_ack(self, for_type: str, for_id: str, trace_id: Optional[str] = None) -> None:
         """发送 ack 确认"""
+        _tid = trace_id or str(uuid.uuid4())
         envelope = {
             "type": "ack",
-            "traceId": trace_id or str(uuid.uuid4()),
+            "traceId": _tid,
             "deviceId": self.device_id,
             "timestamp": int(time.time() * 1000),
             "payload": {"forType": for_type, "forId": for_id},
         }
         self._queue_send(envelope)
+        if self._log_enabled:
+            try:
+                self._logger.info(f"[send][ack] traceId=%s forType=%s forId=%s", _tid, for_type, for_id)
+            except Exception:
+                pass
 
     def send_error(self, for_type: str, for_id: str, code: str, message: str, trace_id: Optional[str] = None) -> None:
         """发送错误通知"""
+        _tid = trace_id or str(uuid.uuid4())
         envelope = {
             "type": "error",
-            "traceId": trace_id or str(uuid.uuid4()),
+            "traceId": _tid,
             "deviceId": self.device_id,
             "timestamp": int(time.time() * 1000),
             "payload": {"forType": for_type, "forId": for_id, "code": code, "message": message},
         }
         self._queue_send(envelope)
+        if self._log_enabled:
+            try:
+                self._logger.info(f"[send][error] traceId=%s forType=%s forId=%s code=%s", _tid, for_type, for_id, code)
+            except Exception:
+                pass
 
     def send_command_result(
         self,
@@ -164,9 +197,10 @@ class WsClient:
         trace_id: Optional[str] = None,
     ) -> None:
         """发送 command_result"""
+        _tid = trace_id or str(uuid.uuid4())
         envelope = {
             "type": "command_result",
-            "traceId": trace_id or str(uuid.uuid4()),
+            "traceId": _tid,
             "deviceId": self.device_id,
             "timestamp": int(time.time() * 1000),
             "payload": {
@@ -177,6 +211,11 @@ class WsClient:
             },
         }
         self._queue_send(envelope)
+        if self._log_enabled:
+            try:
+                self._logger.info(f"[send][command_result] traceId=%s commandId=%s status=%s", _tid, command_id, status)
+            except Exception:
+                pass
 
     # -------------------------- 内部实现 --------------------------
     def _queue_send(self, obj: Any) -> None:
@@ -211,12 +250,29 @@ class WsClient:
         while self._running.is_set():
             try:
                 self._connected.clear()
+                # 计算本次连接 URL 与 Header
+                connect_url = self.url
+                headers = None
+                if self._device_in == "query":
+                    pu = urlparse(self.url)
+                    q = dict(parse_qsl(pu.query, keep_blank_values=True))
+                    q["deviceId"] = self.device_id
+                    new_query = urlencode(q)
+                    connect_url = urlunparse((pu.scheme, pu.netloc, pu.path, pu.params, new_query, pu.fragment))
+                elif self._device_in == "header":
+                    headers = [f"{self._header_name}: {self.device_id}"]
+                if self._log_enabled:
+                    try:
+                        self._logger.info("[connect] url=%s deviceIn=%s deviceId=%s", connect_url, self._device_in, self.device_id)
+                    except Exception:
+                        pass
                 self._ws_app = websocket.WebSocketApp(
-                    self.url,
+                    connect_url,
                     on_open=self._on_open,
                     on_message=self._on_message,
                     on_close=self._on_close,
                     on_error=self._on_error,
+                    header=headers,
                 )
                 # run_forever 支持心跳与自动重连（网络异常时退出本次，随后我们手动 sleep 再重试）
                 self._ws_app.run_forever(
@@ -247,6 +303,18 @@ class WsClient:
             data = json.loads(message)
         except Exception:
             return
+        # 记录收到的报文类型与 traceId
+        if self._log_enabled and isinstance(data, dict):
+            try:
+                _t = data.get("type")
+                _tid = data.get("traceId")
+                if _t == "command":
+                    _cid = (data.get("payload") or {}).get("commandId")
+                    self._logger.info(f"[recv][command] traceId=%s commandId=%s", _tid, _cid)
+                else:
+                    self._logger.info(f"[recv][%s] traceId=%s", str(_t), _tid)
+            except Exception:
+                pass
         # 自动处理下行 command：发送 ack 后分发
         if isinstance(data, dict) and data.get("type") == "command":
             try:

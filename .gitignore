@@ -4,3 +4,4 @@ test.py
 dist
 wxauto_logs
 __pycache__
+.venv

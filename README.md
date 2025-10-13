@@ -316,6 +316,47 @@ wxauto4-bridge
 }
 ```
 
+### 13. 交互式协议模拟器（macOS，无需微信）
+
+在 macOS 上进行“像聊天一样”的联调，可使用内置交互式模拟器脚本，基于仓内 `wxauto4.bridge.ws_client.WsClient`，无需安装整个包、无需微信：
+
+- **脚本路径**：`tools/ws_mock_with_client.py`
+- **依赖**：`websocket-client`
+- **建议用法**：通过 `PYTHONPATH=$(pwd)` 直接引用仓内源码，避免安装 Win32 依赖
+
+运行步骤：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install websocket-client
+
+export WS_URL=ws://127.0.0.1:8080/ws
+export DEVICE_ID=wxrpa-001
+PYTHONPATH=$(pwd) python tools/ws_mock_with_client.py --tick 0 --type text
+```
+
+支持的命令行参数：
+
+- `--ws-url`：WebSocket 服务端地址（亦可用环境变量 `WS_URL`）
+- `--device-id`：设备标识（亦可用环境变量 `DEVICE_ID`，默认 `wxrpa-macos`）
+- `--tick`：周期性发送事件的间隔秒（0 表示关闭）
+- `--type`：默认消息类型（`text|image|file|system`）
+
+控制台交互命令：
+
+- 直接输入任意文本：发送一条 `wechat_message` 事件，`content=该文本`，`msgType=默认值`
+- `/event <msgType> <text...>`：发送一条事件，可指定 `msgType`（也可只输入文本省略 `msgType`）
+- `/set msgType <type>`：设置默认消息类型（`text|image|file|system`）
+- `/json <envelope_json>`：发送自定义原始 JSON 报文（高级联调）
+- `/help`：显示帮助
+- `/quit`：退出
+
+行为说明：
+
+- **上行**：会把你输入的文本打包为 `type=event`、`eventType=wechat_message` 的报文发往服务端
+- **下行**：收到 `type=command` 时，模拟器会自动发送 `ack`，并根据 `action/params/timeoutMs` 返回 `type=command_result`
+
 ---
 
 **免责声明**: 本工具仅用于学习和研究目的，使用者应当遵守相关法律法规，作者不承担任何因使用本工具而产生的法律责任。
